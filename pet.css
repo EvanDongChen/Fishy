@@ -55,6 +55,7 @@ body {
   --body-fold: 0deg;
   --swim-tilt: 0deg;
   --swim-bob: 0px;
+  --flip-rot: 0deg;
   --eye-center-x: 68.7%;
   --eye-center-y: 44.2%;
   --pupil-x: 0px;
@@ -62,7 +63,7 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
-  transform: perspective(420px) rotateY(var(--body-fold)) rotateZ(var(--swim-tilt)) translateY(var(--swim-bob)) scaleX(var(--facing));
+  transform: perspective(420px) rotateY(var(--body-fold)) rotateZ(var(--swim-tilt)) rotateZ(var(--flip-rot)) translateY(var(--swim-bob)) scaleX(var(--facing));
   transform-style: preserve-3d;
   will-change: transform;
   transition: transform 90ms linear;

@@ -44,6 +44,9 @@ let chatUntil = 0;
 let lastChatAt = 0;
 let latestWindowInfo = null;
 let lastSwimSpeed = 0;
+let flipStartedAt = 0;
+let flipUntil = 0;
+let lastFlipAt = 0;
 let settings = {
   speed: 1,
   petSensitivity: 1,
@@ -79,6 +82,9 @@ const PETTING_MIN_MOVE = 3.2;
 const PETTING_STROKE_DISTANCE = 18;
 const PETTING_STROKE_WINDOW_MS = 260;
 const STARTUP_BOOT_MS = 260;
+const FLIP_DURATION_MS = 620;
+const FLIP_COOLDOWN_MS = 9000;
+const FLIP_CHANCE_PER_TICK = 0.0038;
 const MIN_WINDOW_WIDTH = 180;
 const MIN_WINDOW_HEIGHT = 180;
 const WINDOW_SIZE_PADDING = 16;
@@ -313,30 +319,8 @@ function spawnHeartsBurst(x, y) {
 }
 
 function spawnBubble(options = {}) {
-  if (!bubblesLayer || !pet) {
-    return;
-  }
-
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-
-  const size = Math.max(3, options.size || 6);
-  const border = Math.max(1, Math.round(size * 0.28));
-  bubble.style.setProperty("--bubble-size", `${size}px`);
-  bubble.style.setProperty("--bubble-border", `${border}px`);
-
-  const direction = mood === "calm" || !fishLayer
-    ? 1
-    : Number(getComputedStyle(fishLayer).getPropertyValue("--facing")) || 1;
-  const startX = direction >= 0 ? pet.clientWidth * 0.78 : pet.clientWidth * 0.2;
-  const startY = pet.clientHeight * 0.53;
-
-  bubble.style.left = `${startX}px`;
-  bubble.style.top = `${startY}px`;
-  const driftScale = options.driftScale || 1;
-  bubble.style.setProperty("--drift-x", `${(Math.random() * 10 + 6) * direction * driftScale}px`);
-  bubblesLayer.appendChild(bubble);
-  bubble.addEventListener("animationend", () => bubble.remove(), { once: true });
+  // Bubbles are intentionally disabled.
+  void options;
 }
 
 function loadSettings() {
@@ -1006,6 +990,51 @@ function updateSwimPose(dx, dy, speed) {
   fishLayer.style.setProperty("--swim-bob", `${bob}px`);
 }
 
+function maybeStartFlip() {
+  if (!pet || petMode !== "roam" || dragging || isModeMenuOpen || isSettingsPanelOpen()) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now < flipUntil || now - lastFlipAt < FLIP_COOLDOWN_MS) {
+    return;
+  }
+
+  if (Date.now() < pettingUntil) {
+    return;
+  }
+
+  const moodBoost = mood === "excited" ? 1.6 : mood === "sleepy" ? 0.45 : 1;
+  const speedBoost = Math.max(0.7, Math.min(1.35, 0.75 + lastSwimSpeed * 0.1));
+  const chance = FLIP_CHANCE_PER_TICK * moodBoost * speedBoost;
+
+  if (Math.random() < chance) {
+    flipStartedAt = now;
+    flipUntil = now + FLIP_DURATION_MS;
+    lastFlipAt = now;
+    pet.classList.add("is-flipping");
+  }
+}
+
+function updateFlipState() {
+  if (!fishLayer || !pet) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now >= flipUntil || flipStartedAt === 0) {
+    fishLayer.style.setProperty("--flip-rot", "0deg");
+    pet.classList.remove("is-flipping");
+    return;
+  }
+
+  const raw = (now - flipStartedAt) / FLIP_DURATION_MS;
+  const t = Math.max(0, Math.min(1, raw));
+  const eased = 1 - ((1 - t) ** 3);
+  const degrees = eased * 360;
+  fishLayer.style.setProperty("--flip-rot", `${degrees.toFixed(1)}deg`);
+}
+
 async function swimRoam() {
   if (dragging || swimBusy) {
     return;
@@ -1019,6 +1048,8 @@ async function swimRoam() {
     }
 
     updatePupilFromState(state);
+    maybeStartFlip();
+    updateFlipState();
 
     refreshPettingState();
     if (isModeMenuOpen) {
