@@ -3,6 +3,10 @@ const { app, BrowserWindow, ipcMain, screen } = require("electron");
 
 let petWindow;
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function createPetWindow() {
   const display = screen.getPrimaryDisplay();
   const size = 180;
@@ -40,8 +44,43 @@ app.whenReady().then(() => {
       return;
     }
 
-    const [x, y] = petWindow.getPosition();
-    petWindow.setPosition(x + delta.dx, y + delta.dy);
+    const bounds = petWindow.getBounds();
+    const currentX = bounds.x;
+    const currentY = bounds.y;
+    const nextX = currentX + Math.round(delta.dx);
+    const nextY = currentY + Math.round(delta.dy);
+
+    const display = screen.getDisplayNearestPoint({
+      x: nextX + Math.round(bounds.width / 2),
+      y: nextY + Math.round(bounds.height / 2)
+    });
+
+    const area = display.workArea;
+    const minX = area.x;
+    const maxX = area.x + area.width - bounds.width;
+    const minY = area.y;
+    const maxY = area.y + area.height - bounds.height;
+
+    petWindow.setPosition(
+      clamp(nextX, minX, maxX),
+      clamp(nextY, minY, maxY)
+    );
+  });
+
+  ipcMain.handle("pet:get-swim-state", () => {
+    if (!petWindow) {
+      return null;
+    }
+
+    const cursor = screen.getCursorScreenPoint();
+    const bounds = petWindow.getBounds();
+    const display = screen.getDisplayNearestPoint(cursor);
+
+    return {
+      cursor,
+      bounds,
+      workArea: display.workArea
+    };
   });
 
   ipcMain.on("pet:toggle-click-through", (_event, ignore) => {

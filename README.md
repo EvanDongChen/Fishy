@@ -31,14 +31,19 @@ It runs in a transparent always-on-top window, can be dragged around, and stays 
 - `preload.js`: Safe bridge between renderer and main process.
 - `pet.html`, `pet.css`, `pet.js`: Pet visuals, animation, and drag behavior.
 
-## Modular SVG Parts
+## Modular Fish Parts
 
-The fish is now assembled from separate SVG files so you can replace parts independently with your own pixel art:
+The fish is assembled from separate image layers so you can replace parts independently with your own pixel art:
 
-- `assets/fish/body.svg`
-- `assets/fish/tail.svg`
-- `assets/fish/fin-top.svg`
-- `assets/fish/fin-bottom.svg`
-- `assets/fish/eye.svg`
+- `assets/fish/backfin.png`
+- `assets/fish/body.png`
+- `assets/fish/topfin.png`
+- `assets/fish/bottomfin.png`
+- `assets/fish/eye.png`
 
-Keep each file on the same `viewBox="0 0 260 160"` so all layers align correctly.
+Guidelines for clean layering:
+
+- Keep all part images at the same canvas size.
+- Keep transparent backgrounds around each part.
+- Place each part in the same relative position in its image.
+- Keep filenames the same, or update the matching `<img src="...">` entries in `pet.html`.
