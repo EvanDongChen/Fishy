@@ -8,5 +8,8 @@
   },
   "devDependencies": {
     "electron": "^33.2.0"
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.5"
   }
 }

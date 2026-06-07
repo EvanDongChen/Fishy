@@ -264,6 +264,40 @@ body {
   opacity: 1;
 }
 
+.pet.is-typing {
+  filter: drop-shadow(0 16px 20px var(--pet-shadow)) brightness(1.08);
+}
+
+.pet.is-typing .part.tail {
+  animation-duration: calc(0.52s / var(--swim-speed-mult));
+}
+
+.pet.is-typing .part.fin-top {
+  animation-duration: calc(0.62s / var(--swim-speed-mult));
+}
+
+.pet.is-typing .part.fin-bottom {
+  animation-duration: calc(0.72s / var(--swim-speed-mult));
+}
+
+.type-spark {
+  --px: 2px;
+  position: absolute;
+  width: var(--px);
+  height: var(--px);
+  background: #ffe06e;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  box-shadow:
+    calc(var(--px) * 1) 0 #ffe06e,
+    0 calc(var(--px) * 1) #ffe06e,
+    calc(var(--px) * 1) calc(var(--px) * 1) #ffc95a,
+    calc(var(--px) * -1) 0 #fff2a1,
+    0 calc(var(--px) * -1) #fff2a1;
+  opacity: 0;
+  animation: typingSpark 450ms ease-out forwards;
+}
+
 @keyframes floaty {
   0% { transform: translateY(0) rotate(-2deg); }
   50% { transform: translateY(-8px) rotate(2deg); }
@@ -303,4 +337,10 @@ body {
   0% { transform: translate3d(0, 0, 0) scale(0.7); opacity: 0; }
   20% { opacity: 0.8; }
   100% { transform: translate3d(var(--drift-x, 8px), -40px, 0) scale(1.2); opacity: 0; }
+}
+
+@keyframes typingSpark {
+  0% { transform: translate3d(0, 0, 0) scale(0.75); opacity: 0; }
+  25% { opacity: 0.95; }
+  100% { transform: translate3d(var(--drift-x, 0px), -18px, 0) scale(1.2); opacity: 0; }
 }

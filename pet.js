@@ -4,6 +4,7 @@ const eyeBase = document.querySelector(".eye-base");
 const pupil = document.getElementById("pupil");
 const heartsLayer = document.getElementById("hearts");
 const bubblesLayer = document.getElementById("bubbles");
+const typingLayer = document.getElementById("typing");
 const emote = document.getElementById("emote");
 const modeMenu = document.getElementById("mode-menu");
 
@@ -28,6 +29,7 @@ let isModeMenuOpen = false;
 let pettingStrokeDistance = 0;
 let pettingStrokeStartedAt = 0;
 let pettingDirectionMask = 0;
+let typingUntil = 0;
 
 const eyeGeometry = {
   centerXRatio: 0.687,
@@ -47,6 +49,7 @@ const eyeMask = {
 
 const PETTING_HOLD_MS = 240;
 const PUPIL_CLAMP_RADIUS_SCALE = 0.75;
+const TYPING_ACTIVE_MS = 260;
 const PETTING_MIN_MOVE = 3.2;
 const PETTING_STROKE_DISTANCE = 18;
 const PETTING_STROKE_WINDOW_MS = 260;
@@ -350,6 +353,62 @@ function refreshPettingState() {
   pettingStrength += (targetStrength - pettingStrength) * 0.22;
 }
 
+function refreshTypingState() {
+  if (!pet) {
+    return;
+  }
+
+  const active = Date.now() < typingUntil;
+  pet.classList.toggle("is-typing", active);
+}
+
+function spawnTypeSpark() {
+  if (!typingLayer || !pet) {
+    return;
+  }
+
+  const spark = document.createElement("div");
+  spark.className = "type-spark";
+
+  const x = pet.clientWidth * (0.28 + Math.random() * 0.44);
+  const y = pet.clientHeight * (0.16 + Math.random() * 0.26);
+  spark.style.left = `${x}px`;
+  spark.style.top = `${y}px`;
+  spark.style.setProperty("--drift-x", `${(Math.random() - 0.5) * 14}px`);
+
+  typingLayer.appendChild(spark);
+  spark.addEventListener("animationend", () => spark.remove(), { once: true });
+}
+
+function isTypingKey(event) {
+  if (event.metaKey || event.altKey || event.ctrlKey) {
+    return false;
+  }
+
+  if (event.key.length === 1) {
+    return true;
+  }
+
+  return ["Enter", "Backspace", "Delete", "Tab", " "].includes(event.key);
+}
+
+function triggerTypingAnimationBurst() {
+  typingUntil = Date.now() + TYPING_ACTIVE_MS;
+  refreshTypingState();
+
+  if (Math.random() < 0.85) {
+    spawnTypeSpark();
+  }
+}
+
+function handleTypingInput(event) {
+  if (!isTypingKey(event)) {
+    return;
+  }
+
+  triggerTypingAnimationBurst();
+}
+
 function updateModeButtonSelection() {
   if (!modeMenu) {
     return;
@@ -587,7 +646,8 @@ async function swimRoam() {
         : mood === "sleepy"
           ? 0.52
           : 1;
-    const speed = Math.min(8.5, (0.65 + distance * 0.028 + pettingStrength * 0.8) * speedBoost);
+    const typingBoost = Date.now() < typingUntil ? 1.22 : 1;
+    const speed = Math.min(8.5, (0.65 + distance * 0.028 + pettingStrength * 0.8) * speedBoost * typingBoost);
     const moveX = (dx / distance) * speed;
     const moveY = (dy / distance) * speed;
 
@@ -753,6 +813,14 @@ window.addEventListener("mousedown", (event) => {
   closeModeMenu();
 });
 
+window.addEventListener("keydown", handleTypingInput);
+
+if (window.petApi && typeof window.petApi.onGlobalTyping === "function") {
+  window.petApi.onGlobalTyping(() => {
+    triggerTypingAnimationBurst();
+  });
+}
+
 // Start in click-through mode so the pet does not block normal desktop interactions.
 window.petApi.setClickThrough(true);
 setMood("calm");
@@ -773,6 +841,7 @@ if (eyeBase) {
 setInterval(swimRoam, 34);
 setInterval(decayMood, 120);
 setInterval(refreshPettingState, 80);
+setInterval(refreshTypingState, 80);
 setInterval(() => {
   if (dragging || mood === "sleepy") {
     return;
