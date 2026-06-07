@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 160" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <linearGradient id="fishBody" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd99b" />
+      <stop offset="60%" stop-color="#ff9b4a" />
+      <stop offset="100%" stop-color="#f06a1f" />
+    </linearGradient>
+  </defs>
+
+  <ellipse cx="132" cy="80" rx="78" ry="50" fill="url(#fishBody)" />
+  <ellipse cx="150" cy="62" rx="35" ry="14" fill="#ffd9a8" opacity="0.55" />
+  <path d="M206 84 Q216 88 206 92" fill="none" stroke="#7e2d0f" stroke-width="4" stroke-linecap="round" />
+  <circle cx="214" cy="82" r="1.6" fill="#b64a20" />
+  <circle cx="214" cy="90" r="1.6" fill="#b64a20" />
+</svg>
