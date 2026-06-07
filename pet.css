@@ -13,19 +13,36 @@ body {
 }
 
 .stage {
+  position: relative;
   width: 100%;
   height: 100%;
-  display: grid;
-  place-items: center;
+}
+
+.stage.is-booting .pet {
+  opacity: 0;
+  animation: none;
+}
+
+.stage.is-booting .fish-layered,
+.stage.is-booting .pupil,
+.stage.is-booting .part.tail,
+.stage.is-booting .part.fin-top,
+.stage.is-booting .part.fin-bottom {
+  transition: none !important;
+  animation: none !important;
 }
 
 .pet {
   --swim-speed-mult: 1;
-  position: relative;
+  --user-speed-mult: 1;
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
   width: 160px;
   height: 110px;
+  overflow: visible;
   filter: drop-shadow(0 16px 20px var(--pet-shadow));
-  animation: floaty calc(1.9s / var(--swim-speed-mult)) ease-in-out infinite;
+  animation: floaty calc(1.9s / (var(--swim-speed-mult) * var(--user-speed-mult))) ease-in-out infinite;
   cursor: grab;
 }
 
@@ -68,17 +85,17 @@ body {
 
 .part.tail {
   transform-origin: 26% 50%;
-  animation: wag calc(0.75s / var(--swim-speed-mult)) ease-in-out infinite;
+  animation: wag calc(0.75s / (var(--swim-speed-mult) * var(--user-speed-mult))) ease-in-out infinite;
 }
 
 .part.fin-top {
   transform-origin: 50% 28%;
-  animation: finTopFlap calc(0.9s / var(--swim-speed-mult)) ease-in-out infinite;
+  animation: finTopFlap calc(0.9s / (var(--swim-speed-mult) * var(--user-speed-mult))) ease-in-out infinite;
 }
 
 .part.fin-bottom {
   transform-origin: 50% 75%;
-  animation: finBottomFlap calc(1.05s / var(--swim-speed-mult)) ease-in-out infinite;
+  animation: finBottomFlap calc(1.05s / (var(--swim-speed-mult) * var(--user-speed-mult))) ease-in-out infinite;
 }
 
 .part.eye-group {
@@ -165,11 +182,13 @@ body {
 }
 
 .bubble {
+  --bubble-size: 6px;
+  --bubble-border: 2px;
   position: absolute;
-  width: 6px;
-  height: 6px;
+  width: var(--bubble-size);
+  height: var(--bubble-size);
   border-radius: 50%;
-  border: 2px solid rgba(230, 248, 255, 0.95);
+  border: var(--bubble-border) solid rgba(230, 248, 255, 0.95);
   background: rgba(180, 236, 255, 0.25);
   animation: bubbleUp 1.5s ease-out forwards;
 }
@@ -179,15 +198,44 @@ body {
   top: -14px;
   left: 50%;
   transform: translateX(-50%);
+  display: inline-block;
   padding: 2px 7px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.86);
   color: #7c2b10;
   font-size: 12px;
   font-weight: 700;
+  line-height: 1.2;
   letter-spacing: 0.2px;
+  text-align: center;
+  white-space: nowrap;
   opacity: 0;
   transition: opacity 220ms ease;
+}
+
+.emote:empty {
+  opacity: 0 !important;
+  width: 0;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.pet.is-chatting .emote {
+  width: 178px;
+  max-width: 178px;
+  height: auto;
+  min-height: calc(1.2em + 8px);
+  max-height: calc(1.2em * 6 + 8px);
+  padding: 4px 8px;
+  border-radius: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-y: auto;
 }
 
 .mode-menu {
@@ -229,6 +277,48 @@ body {
   background: rgba(255, 153, 92, 0.45);
 }
 
+.settings-panel {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  width: 176px;
+  max-height: 260px;
+  padding: 8px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(130, 66, 35, 0.35);
+  box-shadow: 0 10px 18px rgba(38, 16, 8, 0.25);
+  z-index: 40;
+  pointer-events: auto;
+}
+
+.settings-panel.is-open {
+  display: flex;
+}
+
+.settings-panel h3 {
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: #5a220f;
+}
+
+.settings-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: #5a220f;
+}
+
+.settings-panel input,
+.settings-panel select,
+.settings-panel button {
+  font-size: 11px;
+}
+
 .pet.is-happy {
   --swim-speed-mult: 1.2;
 }
@@ -261,6 +351,14 @@ body {
 }
 
 .pet.is-being-pet .emote {
+  opacity: 1;
+}
+
+.pet.is-petting-emote .emote {
+  opacity: 1;
+}
+
+.pet.is-chatting .emote {
   opacity: 1;
 }
 

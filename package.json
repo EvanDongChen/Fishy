@@ -10,6 +10,7 @@
     "electron": "^33.2.0"
   },
   "dependencies": {
+    "active-win": "^8.2.1",
     "uiohook-napi": "^1.5.5"
   }
 }

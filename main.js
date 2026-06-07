@@ -4,6 +4,24 @@ const { uIOhook } = require("uiohook-napi");
 
 let petWindow;
 let lastTypingPulseAt = 0;
+let preferredDisplayId = null;
+let stopActiveWindowPolling = null;
+const COMPACT_WINDOW_SIZE = { width: 180, height: 180 };
+const MAX_DYNAMIC_WINDOW_SIZE = { width: 560, height: 520 };
+let requestedWindowSize = {
+  width: COMPACT_WINDOW_SIZE.width,
+  height: COMPACT_WINDOW_SIZE.height
+};
+
+function getPreferredDisplay() {
+  const displays = screen.getAllDisplays();
+  if (preferredDisplayId === null) {
+    return screen.getPrimaryDisplay();
+  }
+
+  const preferred = displays.find((display) => display.id === preferredDisplayId);
+  return preferred || screen.getPrimaryDisplay();
+}
 
 function isTypingLikeKeycode(keycode) {
   // Exclude common modifiers and lock/function/navigation keys.
@@ -60,29 +78,81 @@ function setupGlobalTypingHook() {
   uIOhook.start();
 }
 
+async function setupActiveWindowPolling() {
+  let activeWinFn;
+  try {
+    const mod = await import("active-win");
+    activeWinFn = mod.default;
+  } catch {
+    return;
+  }
+
+  if (typeof activeWinFn !== "function") {
+    return;
+  }
+
+  let lastWindowKey = "";
+  const timer = setInterval(async () => {
+    if (!petWindow || petWindow.isDestroyed()) {
+      return;
+    }
+
+    try {
+      const info = await activeWinFn();
+      if (!info || !info.title) {
+        return;
+      }
+
+      const appName = info.owner?.name || "";
+      const title = info.title || "";
+
+      // Ignore our own window to avoid self-comment loops.
+      if (title === "Fishy Pet") {
+        return;
+      }
+
+      const key = `${appName}::${title}`;
+      if (key === lastWindowKey) {
+        return;
+      }
+
+      lastWindowKey = key;
+      petWindow.webContents.send("pet:active-window", {
+        appName,
+        title
+      });
+    } catch {
+      // Ignore transient active window detection errors.
+    }
+  }, 1500);
+
+  stopActiveWindowPolling = () => clearInterval(timer);
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
 function createPetWindow() {
-  const display = screen.getPrimaryDisplay();
-  const size = 180;
+  const display = getPreferredDisplay();
   const margin = 24;
   const x = Math.max(0, display.workArea.x + margin);
-  const y = Math.max(0, display.workArea.y + display.workArea.height - size - margin);
+  const y = Math.max(0, display.workArea.y + display.workArea.height - COMPACT_WINDOW_SIZE.height - margin);
 
   petWindow = new BrowserWindow({
-    width: size,
-    height: size,
+    width: COMPACT_WINDOW_SIZE.width,
+    height: COMPACT_WINDOW_SIZE.height,
     x,
     y,
     frame: false,
     transparent: true,
     hasShadow: false,
+    roundedCorners: false,
     skipTaskbar: true,
     resizable: false,
     alwaysOnTop: true,
     fullscreenable: false,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js")
     }
@@ -91,11 +161,98 @@ function createPetWindow() {
   petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   petWindow.setAlwaysOnTop(true, "screen-saver");
   petWindow.loadFile("pet.html");
+  petWindow.once("ready-to-show", () => {
+    if (!petWindow || petWindow.isDestroyed()) {
+      return;
+    }
+
+    petWindow.showInactive();
+  });
+}
+
+function getTargetWindowSize() {
+  return {
+    width: clamp(
+      Math.round(requestedWindowSize.width),
+      COMPACT_WINDOW_SIZE.width,
+      MAX_DYNAMIC_WINDOW_SIZE.width
+    ),
+    height: clamp(
+      Math.round(requestedWindowSize.height),
+      COMPACT_WINDOW_SIZE.height,
+      MAX_DYNAMIC_WINDOW_SIZE.height
+    )
+  };
+}
+
+function applyTargetWindowSize() {
+  if (!petWindow || petWindow.isDestroyed()) {
+    return;
+  }
+
+  const target = getTargetWindowSize();
+  const current = petWindow.getBounds();
+  if (current.width === target.width && current.height === target.height) {
+    return;
+  }
+
+  const area = getPreferredDisplay().workArea;
+  const bottom = current.y + current.height;
+  const desiredX = current.x;
+  const desiredY = bottom - target.height;
+
+  const minX = area.x;
+  const maxX = area.x + area.width - target.width;
+  const minY = area.y;
+  const maxY = area.y + area.height - target.height;
+
+  petWindow.setBounds({
+    x: clamp(desiredX, minX, maxX),
+    y: clamp(desiredY, minY, maxY),
+    width: target.width,
+    height: target.height
+  }, false);
+}
+
+function setSettingsWindowOpen(isOpen) {
+  // Renderer now drives exact size; this remains for backward compatibility.
+  if (typeof isOpen !== "boolean") {
+    return;
+  }
+}
+
+function setChatWindowOpen(isOpen) {
+  // Renderer now drives exact size; this remains for backward compatibility.
+  if (typeof isOpen !== "boolean") {
+    return;
+  }
+}
+
+function setRequestedWindowSize(payload) {
+  if (!payload || typeof payload !== "object") {
+    return;
+  }
+
+  const width = Number(payload.width);
+  const height = Number(payload.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) {
+    return;
+  }
+
+  const snappedWidth = Math.ceil(width / 8) * 8;
+  const snappedHeight = Math.ceil(height / 8) * 8;
+
+  requestedWindowSize = {
+    width: snappedWidth,
+    height: snappedHeight
+  };
+  applyTargetWindowSize();
 }
 
 app.whenReady().then(() => {
   createPetWindow();
   setupGlobalTypingHook();
+  setupActiveWindowPolling();
 
   ipcMain.on("pet:move", (_event, delta) => {
     if (!petWindow) {
@@ -108,12 +265,7 @@ app.whenReady().then(() => {
     const nextX = currentX + Math.round(delta.dx);
     const nextY = currentY + Math.round(delta.dy);
 
-    const display = screen.getDisplayNearestPoint({
-      x: nextX + Math.round(bounds.width / 2),
-      y: nextY + Math.round(bounds.height / 2)
-    });
-
-    const area = display.workArea;
+    const area = getPreferredDisplay().workArea;
     const minX = area.x;
     const maxX = area.x + area.width - bounds.width;
     const minY = area.y;
@@ -132,13 +284,43 @@ app.whenReady().then(() => {
 
     const cursor = screen.getCursorScreenPoint();
     const bounds = petWindow.getBounds();
-    const display = screen.getDisplayNearestPoint(cursor);
+    const display = getPreferredDisplay();
 
     return {
       cursor,
       bounds,
       workArea: display.workArea
     };
+  });
+
+  ipcMain.handle("pet:get-monitors", () => {
+    const displays = screen.getAllDisplays();
+    const primary = screen.getPrimaryDisplay();
+
+    return displays.map((display) => ({
+      id: display.id,
+      label: `${display.id === primary.id ? "Primary" : "Display"} ${display.id} (${display.workArea.width}x${display.workArea.height})`
+    }));
+  });
+
+  ipcMain.on("pet:set-preferred-monitor", (_event, id) => {
+    if (typeof id !== "number") {
+      return;
+    }
+
+    preferredDisplayId = id;
+  });
+
+  ipcMain.on("pet:set-settings-open", (_event, isOpen) => {
+    setSettingsWindowOpen(Boolean(isOpen));
+  });
+
+  ipcMain.on("pet:set-chat-open", (_event, isOpen) => {
+    setChatWindowOpen(Boolean(isOpen));
+  });
+
+  ipcMain.on("pet:set-window-size", (_event, size) => {
+    setRequestedWindowSize(size);
   });
 
   ipcMain.on("pet:toggle-click-through", (_event, ignore) => {
@@ -158,6 +340,10 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  if (typeof stopActiveWindowPolling === "function") {
+    stopActiveWindowPolling();
+  }
+
   try {
     uIOhook.stop();
   } catch {

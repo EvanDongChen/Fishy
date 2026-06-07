@@ -1,4 +1,5 @@
 const pet = document.getElementById("pet");
+const stage = document.getElementById("stage");
 const fishLayer = document.querySelector(".fish-layered");
 const eyeBase = document.querySelector(".eye-base");
 const pupil = document.getElementById("pupil");
@@ -7,6 +8,14 @@ const bubblesLayer = document.getElementById("bubbles");
 const typingLayer = document.getElementById("typing");
 const emote = document.getElementById("emote");
 const modeMenu = document.getElementById("mode-menu");
+const settingsPanel = document.getElementById("settings-panel");
+const speedInput = document.getElementById("setting-speed");
+const petSensitivityInput = document.getElementById("setting-pet-sensitivity");
+const heartAmountInput = document.getElementById("setting-heart-amount");
+const bubbleAmountInput = document.getElementById("setting-bubble-amount");
+const pupilSizeInput = document.getElementById("setting-pupil-size");
+const monitorSelect = document.getElementById("setting-monitor");
+const settingsCloseButton = document.getElementById("settings-close");
 
 let dragging = false;
 let lastX = 0;
@@ -30,6 +39,19 @@ let pettingStrokeDistance = 0;
 let pettingStrokeStartedAt = 0;
 let pettingDirectionMask = 0;
 let typingUntil = 0;
+let pettingEmoteUntil = 0;
+let chatUntil = 0;
+let lastChatAt = 0;
+let latestWindowInfo = null;
+let lastSwimSpeed = 0;
+let settings = {
+  speed: 1,
+  petSensitivity: 1,
+  heartAmount: 1,
+  bubbleAmount: 1,
+  pupilSize: 1
+};
+const SETTINGS_KEY = "fishy.settings.v1";
 
 const eyeGeometry = {
   centerXRatio: 0.687,
@@ -48,15 +70,25 @@ const eyeMask = {
 };
 
 const PETTING_HOLD_MS = 240;
+const PETTING_EMOTE_HOLD_MS = 520;
+const CHAT_HOLD_MS = 4200;
+const CHAT_COOLDOWN_MS = 9000;
 const PUPIL_CLAMP_RADIUS_SCALE = 0.75;
 const TYPING_ACTIVE_MS = 260;
 const PETTING_MIN_MOVE = 3.2;
 const PETTING_STROKE_DISTANCE = 18;
 const PETTING_STROKE_WINDOW_MS = 260;
+const STARTUP_BOOT_MS = 260;
+const MIN_WINDOW_WIDTH = 180;
+const MIN_WINDOW_HEIGHT = 180;
+const WINDOW_SIZE_PADDING = 16;
+const WINDOW_SIZE_EPSILON = 6;
 const DIR_LEFT = 1;
 const DIR_RIGHT = 2;
 const DIR_UP = 4;
 const DIR_DOWN = 8;
+let lastWindowSizeRequest = { width: 0, height: 0 };
+let windowSizeMeasureQueued = false;
 
 function countDirectionBits(mask) {
   let count = 0;
@@ -216,6 +248,7 @@ function setMood(nextMood) {
   if (nextMood === "happy") {
     pet.classList.add("is-happy");
     if (emote) {
+      emote.dataset.kind = "mood";
       emote.textContent = "<3";
     }
     return;
@@ -224,6 +257,7 @@ function setMood(nextMood) {
   if (nextMood === "excited") {
     pet.classList.add("is-excited");
     if (emote) {
+      emote.dataset.kind = "mood";
       emote.textContent = "!!";
     }
     return;
@@ -232,14 +266,26 @@ function setMood(nextMood) {
   if (nextMood === "sleepy") {
     pet.classList.add("is-sleepy");
     if (emote) {
+      emote.dataset.kind = "mood";
       emote.textContent = "zzz";
     }
     return;
   }
 
   if (emote) {
+    delete emote.dataset.kind;
     emote.textContent = "";
   }
+}
+
+function clearChatEmoteIfActive() {
+  if (!emote || emote.dataset.kind !== "chat") {
+    return;
+  }
+
+  delete emote.dataset.kind;
+  emote.textContent = "";
+  emote.style.left = "50%";
 }
 
 function spawnHeart(x, y) {
@@ -256,13 +302,28 @@ function spawnHeart(x, y) {
   heart.addEventListener("animationend", () => heart.remove(), { once: true });
 }
 
-function spawnBubble() {
+function spawnHeartsBurst(x, y) {
+  const whole = Math.floor(settings.heartAmount);
+  const fractional = settings.heartAmount - whole;
+  const count = whole + (Math.random() < fractional ? 1 : 0);
+
+  for (let i = 0; i < count; i += 1) {
+    spawnHeart(x + (Math.random() - 0.5) * 10, y + (Math.random() - 0.5) * 8);
+  }
+}
+
+function spawnBubble(options = {}) {
   if (!bubblesLayer || !pet) {
     return;
   }
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
+
+  const size = Math.max(3, options.size || 6);
+  const border = Math.max(1, Math.round(size * 0.28));
+  bubble.style.setProperty("--bubble-size", `${size}px`);
+  bubble.style.setProperty("--bubble-border", `${border}px`);
 
   const direction = mood === "calm" || !fishLayer
     ? 1
@@ -272,9 +333,105 @@ function spawnBubble() {
 
   bubble.style.left = `${startX}px`;
   bubble.style.top = `${startY}px`;
-  bubble.style.setProperty("--drift-x", `${(Math.random() * 10 + 6) * direction}px`);
+  const driftScale = options.driftScale || 1;
+  bubble.style.setProperty("--drift-x", `${(Math.random() * 10 + 6) * direction * driftScale}px`);
   bubblesLayer.appendChild(bubble);
   bubble.addEventListener("animationend", () => bubble.remove(), { once: true });
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) {
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    settings = {
+      ...settings,
+      ...parsed
+    };
+  } catch {
+    // Ignore malformed settings and keep defaults.
+  }
+}
+
+function saveSettings() {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function applySettings() {
+  if (pet) {
+    pet.style.setProperty("--user-speed-mult", String(settings.speed));
+  }
+}
+
+function clampSetting(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function syncSettingsInputs() {
+  if (speedInput) speedInput.value = String(settings.speed);
+  if (petSensitivityInput) petSensitivityInput.value = String(settings.petSensitivity);
+  if (heartAmountInput) heartAmountInput.value = String(settings.heartAmount);
+  if (bubbleAmountInput) bubbleAmountInput.value = String(settings.bubbleAmount);
+  if (pupilSizeInput) pupilSizeInput.value = String(settings.pupilSize);
+}
+
+function isSettingsPanelOpen() {
+  return Boolean(settingsPanel && settingsPanel.classList.contains("is-open"));
+}
+
+function openSettingsPanel() {
+  if (!settingsPanel) {
+    return;
+  }
+
+  settingsPanel.classList.add("is-open");
+  settingsPanel.setAttribute("aria-hidden", "false");
+  closeModeMenu();
+  if (window.petApi && typeof window.petApi.setSettingsOpen === "function") {
+    window.petApi.setSettingsOpen(true);
+  }
+  window.petApi.setClickThrough(false);
+  scheduleWindowSizeSync();
+}
+
+function closeSettingsPanel() {
+  if (!settingsPanel) {
+    return;
+  }
+
+  settingsPanel.classList.remove("is-open");
+  settingsPanel.setAttribute("aria-hidden", "true");
+  if (window.petApi && typeof window.petApi.setSettingsOpen === "function") {
+    window.petApi.setSettingsOpen(false);
+  }
+  if (!isModeMenuOpen && !dragging) {
+    window.petApi.setClickThrough(true);
+  }
+  scheduleWindowSizeSync();
+}
+
+async function loadMonitorOptions() {
+  if (!monitorSelect || !window.petApi || typeof window.petApi.getMonitors !== "function") {
+    return;
+  }
+
+  const monitors = await window.petApi.getMonitors();
+  monitorSelect.innerHTML = "";
+
+  for (const monitor of monitors) {
+    const option = document.createElement("option");
+    option.value = String(monitor.id);
+    option.textContent = monitor.label;
+    monitorSelect.appendChild(option);
+  }
+
+  if (monitors.length > 0) {
+    monitorSelect.value = String(monitors[0].id);
+    window.petApi.setPreferredMonitor(monitors[0].id);
+  }
 }
 
 function boostAffection(amount) {
@@ -346,11 +503,296 @@ function refreshPettingState() {
     return;
   }
 
-  const active = Date.now() < pettingUntil;
+  const now = Date.now();
+  const active = now < pettingUntil;
+  const emoteActive = active || now < pettingEmoteUntil;
+  const chatActive = now < chatUntil;
   pet.classList.toggle("is-being-pet", active);
+  pet.classList.toggle("is-petting-emote", emoteActive);
+  pet.classList.toggle("is-chatting", chatActive);
+
+  if (!chatActive) {
+    clearChatEmoteIfActive();
+  }
+
+  if (emote && emoteActive) {
+    emote.textContent = "<3";
+  }
 
   const targetStrength = active ? 1 : 0;
   pettingStrength += (targetStrength - pettingStrength) * 0.22;
+}
+
+function trimTitle(title) {
+  if (!title) {
+    return "";
+  }
+
+  return title.length > 40 ? `${title.slice(0, 37)}...` : title;
+}
+
+function trimAppName(appName) {
+  if (!appName) {
+    return "app";
+  }
+
+  return appName.length > 24 ? `${appName.slice(0, 21)}...` : appName;
+}
+
+function detectAppCategory(appName, title) {
+  const haystack = `${appName || ""} ${title || ""}`.toLowerCase();
+
+  if (/code|visual studio|cursor|notepad\+\+|sublime|intellij|pycharm|webstorm|rider/.test(haystack)) {
+    return "coding";
+  }
+  if (/chrome|firefox|edge|brave|opera|safari/.test(haystack)) {
+    return "browser";
+  }
+  if (/discord|slack|teams|telegram|whatsapp|messenger/.test(haystack)) {
+    return "chat";
+  }
+  if (/spotify|music|youtube music|vlc/.test(haystack)) {
+    return "music";
+  }
+  if (/terminal|powershell|cmd|command prompt|windows terminal|bash|zsh|git bash/.test(haystack)) {
+    return "terminal";
+  }
+  if (/excel|word|powerpoint|onenote|notion|obsidian|docs|sheets|office/.test(haystack)) {
+    return "docs";
+  }
+  if (/steam|epic|battle\.net|riot|game/.test(haystack)) {
+    return "gaming";
+  }
+
+  return "generic";
+}
+
+function buildWindowComment(appName, title) {
+  const shortTitle = trimTitle(title);
+  const app = trimAppName(appName);
+  const category = detectAppCategory(appName, title);
+  let templates;
+
+  if (category === "coding") {
+    templates = [
+      `Coding in ${app}. Keep it clean.`,
+      `${app} open. Time to ship.`,
+      `Nice file: ${shortTitle}`,
+      `Debug mode in ${app}?`,
+      `${app} + calm fish support.`
+    ];
+  } else if (category === "browser") {
+    templates = [
+      `Browsing ${app}. Found anything good?`,
+      `That tab title is wild: ${shortTitle}`,
+      `${app} research session detected.`,
+      `Many tabs or just enough tabs?`,
+      `I can almost read: ${shortTitle}`
+    ];
+  } else if (category === "chat") {
+    templates = [
+      `${app} messages are popping off.`,
+      `Reply queue in ${app}?`,
+      `Social mode active in ${app}.`,
+      `Be nice in chat, human.`,
+      `Conversation check: ${shortTitle}`
+    ];
+  } else if (category === "music") {
+    templates = [
+      `${app} soundtrack detected.`,
+      `Good vibes from ${app}.`,
+      `Now playing maybe: ${shortTitle}`,
+      `${app} and swimming rhythm sync.`,
+      `This feels like focus music.`
+    ];
+  } else if (category === "terminal") {
+    templates = [
+      `Terminal up. Commands incoming.`,
+      `${app} looks serious right now.`,
+      `Ship it from ${app}.`,
+      `I trust your shell skills.`,
+      `Prompt spotted: ${shortTitle}`
+    ];
+  } else if (category === "docs") {
+    templates = [
+      `${app} writing session.`,
+      `Document brain on in ${app}.`,
+      `That title sounds important: ${shortTitle}`,
+      `${app} productivity swim.`,
+      `Clean notes, clean mind.`
+    ];
+  } else if (category === "gaming") {
+    templates = [
+      `${app} game mode detected.`,
+      `Victory fish is on standby.`,
+      `${app} looks intense.`,
+      `High score energy right now.`,
+      `Controller vibes from here.`
+    ];
+  } else {
+    templates = [
+      `${app} focus mode!`,
+      `I see: ${shortTitle}`,
+      `Working in ${app} now?`,
+      `Window check: ${shortTitle}`,
+      `${app} looks busy.`
+    ];
+  }
+
+  return templates[Math.floor(Math.random() * templates.length)];
+}
+
+function showChatLine(text) {
+  if (!pet || !emote || !text) {
+    return;
+  }
+
+  emote.textContent = text;
+  emote.dataset.kind = "chat";
+  chatUntil = Date.now() + CHAT_HOLD_MS;
+  pet.classList.add("is-chatting");
+
+  // Reposition after layout so the bubble stays inside the window.
+  requestAnimationFrame(() => {
+    clampEmoteToStageBounds();
+    scheduleWindowSizeSync();
+  });
+}
+
+function clampEmoteToStageBounds() {
+  if (!pet || !emote || !stage || !pet.classList.contains("is-chatting")) {
+    return;
+  }
+
+  const bubbleHalf = emote.offsetWidth * 0.5;
+  const stageWidth = stage.clientWidth;
+  const petLeft = pet.offsetLeft;
+  const preferredCenterInStage = petLeft + pet.clientWidth * 0.5;
+  const minCenter = bubbleHalf + 10;
+  const maxCenter = Math.max(minCenter, stageWidth - bubbleHalf - 10);
+  const clampedCenter = Math.max(minCenter, Math.min(preferredCenterInStage, maxCenter));
+  const leftInPet = clampedCenter - petLeft;
+
+  emote.style.left = `${leftInPet}px`;
+}
+
+function isElementShown(element) {
+  if (!element) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
+}
+
+function trackElementRect(element, stageRect, bounds) {
+  if (!element || !isElementShown(element)) {
+    return;
+  }
+
+  const rect = element.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    return;
+  }
+
+  bounds.left = Math.min(bounds.left, rect.left - stageRect.left);
+  bounds.top = Math.min(bounds.top, rect.top - stageRect.top);
+  bounds.right = Math.max(bounds.right, rect.right - stageRect.left);
+  bounds.bottom = Math.max(bounds.bottom, rect.bottom - stageRect.top);
+}
+
+function computeRequiredWindowSize() {
+  if (!stage || !pet) {
+    return {
+      width: MIN_WINDOW_WIDTH,
+      height: MIN_WINDOW_HEIGHT
+    };
+  }
+
+  const stageRect = stage.getBoundingClientRect();
+  const bounds = {
+    left: Number.POSITIVE_INFINITY,
+    top: Number.POSITIVE_INFINITY,
+    right: Number.NEGATIVE_INFINITY,
+    bottom: Number.NEGATIVE_INFINITY
+  };
+
+  trackElementRect(pet, stageRect, bounds);
+  if (isModeMenuOpen) {
+    trackElementRect(modeMenu, stageRect, bounds);
+  }
+  if (isSettingsPanelOpen()) {
+    trackElementRect(settingsPanel, stageRect, bounds);
+  }
+  if (pet.classList.contains("is-chatting")) {
+    trackElementRect(emote, stageRect, bounds);
+  }
+
+  if (!Number.isFinite(bounds.left)) {
+    return {
+      width: MIN_WINDOW_WIDTH,
+      height: MIN_WINDOW_HEIGHT
+    };
+  }
+
+  const width = Math.max(
+    MIN_WINDOW_WIDTH,
+    Math.ceil(Math.max(bounds.right + WINDOW_SIZE_PADDING, bounds.right - bounds.left + WINDOW_SIZE_PADDING * 2))
+  );
+  const height = Math.max(
+    MIN_WINDOW_HEIGHT,
+    Math.ceil(Math.max(bounds.bottom + WINDOW_SIZE_PADDING, bounds.bottom - bounds.top + WINDOW_SIZE_PADDING * 2))
+  );
+
+  return { width, height };
+}
+
+function syncWindowSizeToContent() {
+  if (!window.petApi || typeof window.petApi.setWindowSize !== "function") {
+    return;
+  }
+
+  const target = computeRequiredWindowSize();
+  if (
+    Math.abs(target.width - lastWindowSizeRequest.width) <= WINDOW_SIZE_EPSILON
+    && Math.abs(target.height - lastWindowSizeRequest.height) <= WINDOW_SIZE_EPSILON
+  ) {
+    return;
+  }
+
+  lastWindowSizeRequest = target;
+  window.petApi.setWindowSize(target);
+}
+
+function scheduleWindowSizeSync() {
+  if (windowSizeMeasureQueued) {
+    return;
+  }
+
+  windowSizeMeasureQueued = true;
+  requestAnimationFrame(() => {
+    windowSizeMeasureQueued = false;
+    syncWindowSizeToContent();
+  });
+}
+
+function maybeCommentOnWindow() {
+  if (!latestWindowInfo || !emote) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastChatAt < CHAT_COOLDOWN_MS) {
+    return;
+  }
+
+  if (isModeMenuOpen || isSettingsPanelOpen() || dragging) {
+    return;
+  }
+
+  const line = buildWindowComment(latestWindowInfo.appName, latestWindowInfo.title);
+  showChatLine(line);
+  lastChatAt = now;
 }
 
 function refreshTypingState() {
@@ -449,6 +891,7 @@ function openModeMenu(clientX, clientY) {
 
   modeMenu.style.left = `${left}px`;
   modeMenu.style.top = `${top}px`;
+  scheduleWindowSizeSync();
 }
 
 function closeModeMenu() {
@@ -463,6 +906,8 @@ function closeModeMenu() {
   if (!dragging) {
     window.petApi.setClickThrough(true);
   }
+
+  scheduleWindowSizeSync();
 }
 
 function updatePupilFromState(state) {
@@ -491,7 +936,7 @@ function updatePupilFromState(state) {
 
   const eyeCenterX = fishWidth * eyeGeometry.centerXRatio;
   const eyeCenterY = fishHeight * eyeGeometry.centerYRatio;
-  const pupilSize = Math.max(2, fishWidth * eyeGeometry.pupilSizeRatio);
+  const pupilSize = Math.max(2, fishWidth * eyeGeometry.pupilSizeRatio * settings.pupilSize);
   let dx = 0;
   let dy = 0;
 
@@ -581,6 +1026,11 @@ async function swimRoam() {
       return;
     }
 
+    if (isSettingsPanelOpen()) {
+      updateSwimPose(facingHint, 0, 0.12);
+      return;
+    }
+
     if (petMode === "idle") {
       const isPetting = Date.now() < pettingUntil;
       if (isPetting) {
@@ -647,12 +1097,21 @@ async function swimRoam() {
           ? 0.52
           : 1;
     const typingBoost = Date.now() < typingUntil ? 1.22 : 1;
-    const speed = Math.min(8.5, (0.65 + distance * 0.028 + pettingStrength * 0.8) * speedBoost * typingBoost);
+    const speed = Math.min(8.5, (0.65 + distance * 0.028 + pettingStrength * 0.8) * speedBoost * typingBoost * settings.speed);
     const moveX = (dx / distance) * speed;
     const moveY = (dy / distance) * speed;
 
+    lastSwimSpeed = speed;
     updateSwimPose(dx, dy, speed);
     window.petApi.moveBy(moveX, moveY);
+
+    const trailChance = Math.min(0.95, (0.08 + speed * 0.08) * settings.bubbleAmount);
+    if (Math.random() < trailChance) {
+      spawnBubble({
+        size: 3 + speed * 0.75,
+        driftScale: 0.7 + speed * 0.08
+      });
+    }
   } finally {
     swimBusy = false;
   }
@@ -663,7 +1122,7 @@ pet.addEventListener("mouseenter", () => {
 });
 
 pet.addEventListener("mouseleave", () => {
-  if (!dragging && !isModeMenuOpen) {
+  if (!dragging && !isModeMenuOpen && !isSettingsPanelOpen()) {
     window.petApi.setClickThrough(true);
   }
 });
@@ -687,7 +1146,7 @@ pet.addEventListener("mousedown", (event) => {
 });
 
 pet.addEventListener("mousemove", (event) => {
-  if (isModeMenuOpen) {
+  if (isModeMenuOpen || isSettingsPanelOpen()) {
     return;
   }
 
@@ -707,7 +1166,7 @@ pet.addEventListener("mousemove", (event) => {
   lastPetX = event.clientX;
   lastPetY = event.clientY;
 
-  if (travel < PETTING_MIN_MOVE) {
+  if (travel < PETTING_MIN_MOVE / settings.petSensitivity) {
     return;
   }
 
@@ -729,7 +1188,7 @@ pet.addEventListener("mousemove", (event) => {
   }
 
   if (
-    pettingStrokeDistance < PETTING_STROKE_DISTANCE
+    pettingStrokeDistance < PETTING_STROKE_DISTANCE / settings.petSensitivity
     || countDirectionBits(pettingDirectionMask) < 2
   ) {
     return;
@@ -739,12 +1198,14 @@ pet.addEventListener("mousemove", (event) => {
   pettingStrokeStartedAt = now;
   pettingDirectionMask = 0;
 
-  pettingUntil = Date.now() + PETTING_HOLD_MS;
+  const nowForPet = Date.now();
+  pettingUntil = Math.max(pettingUntil, nowForPet + PETTING_HOLD_MS);
+  pettingEmoteUntil = nowForPet + PETTING_EMOTE_HOLD_MS;
   boostAffection(Math.min(2.2, travel * 0.11));
   setMood("happy");
 
-  if (Math.random() < 0.38) {
-    spawnHeart(event.offsetX - 6, event.offsetY - 12);
+  if (Math.random() < Math.min(0.95, 0.22 + settings.heartAmount * 0.2)) {
+    spawnHeartsBurst(event.offsetX - 6, event.offsetY - 12);
   }
 });
 
@@ -780,6 +1241,7 @@ pet.addEventListener("mouseleave", () => {
   pettingStrokeDistance = 0;
   pettingStrokeStartedAt = 0;
   pettingDirectionMask = 0;
+  pettingEmoteUntil = 0;
   pettingUntil = 0;
   refreshPettingState();
 });
@@ -796,16 +1258,91 @@ if (modeMenu) {
     }
 
     const mode = target.dataset.mode;
-    if (!mode) {
+    if (mode) {
+      setPetMode(mode);
+      closeModeMenu();
       return;
     }
 
-    setPetMode(mode);
-    closeModeMenu();
+    const action = target.dataset.action;
+    if (action === "settings") {
+      openSettingsPanel();
+      return;
+    }
+
+    if (!mode && !action) {
+      return;
+    }
+  });
+}
+
+if (settingsPanel) {
+  settingsPanel.addEventListener("mousedown", (event) => {
+    event.stopPropagation();
+  });
+}
+
+if (settingsCloseButton) {
+  settingsCloseButton.addEventListener("click", () => {
+    closeSettingsPanel();
+  });
+}
+
+if (speedInput) {
+  speedInput.addEventListener("input", () => {
+    settings.speed = clampSetting(Number(speedInput.value), 0.5, 2);
+    applySettings();
+    saveSettings();
+  });
+}
+
+if (petSensitivityInput) {
+  petSensitivityInput.addEventListener("input", () => {
+    settings.petSensitivity = clampSetting(Number(petSensitivityInput.value), 0.5, 2);
+    saveSettings();
+  });
+}
+
+if (heartAmountInput) {
+  heartAmountInput.addEventListener("input", () => {
+    settings.heartAmount = clampSetting(Number(heartAmountInput.value), 0, 3);
+    saveSettings();
+  });
+}
+
+if (bubbleAmountInput) {
+  bubbleAmountInput.addEventListener("input", () => {
+    settings.bubbleAmount = clampSetting(Number(bubbleAmountInput.value), 0, 3);
+    saveSettings();
+  });
+}
+
+if (pupilSizeInput) {
+  pupilSizeInput.addEventListener("input", () => {
+    settings.pupilSize = clampSetting(Number(pupilSizeInput.value), 0.6, 1.8);
+    saveSettings();
+  });
+}
+
+if (monitorSelect) {
+  monitorSelect.addEventListener("change", () => {
+    const id = Number(monitorSelect.value);
+    if (!Number.isNaN(id) && window.petApi && typeof window.petApi.setPreferredMonitor === "function") {
+      window.petApi.setPreferredMonitor(id);
+    }
   });
 }
 
 window.addEventListener("mousedown", (event) => {
+  if (isSettingsPanelOpen()) {
+    if (settingsPanel && settingsPanel.contains(event.target)) {
+      return;
+    }
+
+    closeSettingsPanel();
+    return;
+  }
+
   if (!isModeMenuOpen || !modeMenu || modeMenu.contains(event.target)) {
     return;
   }
@@ -821,11 +1358,34 @@ if (window.petApi && typeof window.petApi.onGlobalTyping === "function") {
   });
 }
 
+if (window.petApi && typeof window.petApi.onActiveWindow === "function") {
+  window.petApi.onActiveWindow((payload) => {
+    if (!payload || !payload.title) {
+      return;
+    }
+
+    latestWindowInfo = {
+      appName: payload.appName || "",
+      title: payload.title || ""
+    };
+    maybeCommentOnWindow();
+  });
+}
+
 // Start in click-through mode so the pet does not block normal desktop interactions.
 window.petApi.setClickThrough(true);
+loadSettings();
+applySettings();
+syncSettingsInputs();
 setMood("calm");
 refreshPettingState();
 setPetMode("idle");
+
+loadMonitorOptions();
+
+if (stage) {
+  stage.classList.add("is-booting");
+}
 
 if (eyeBase) {
   if (eyeBase.complete) {
@@ -838,16 +1398,40 @@ if (eyeBase) {
 }
 
 // Swim around autonomously with a light easing loop.
-setInterval(swimRoam, 34);
-setInterval(decayMood, 120);
-setInterval(refreshPettingState, 80);
-setInterval(refreshTypingState, 80);
+setTimeout(() => {
+  if (stage) {
+    stage.classList.remove("is-booting");
+  }
+
+  setInterval(swimRoam, 34);
+  setInterval(decayMood, 120);
+  setInterval(refreshPettingState, 80);
+  setInterval(refreshTypingState, 80);
+  scheduleWindowSizeSync();
+}, STARTUP_BOOT_MS);
+setInterval(() => {
+  if (Date.now() >= chatUntil && pet) {
+    pet.classList.remove("is-chatting");
+    clearChatEmoteIfActive();
+    scheduleWindowSizeSync();
+  }
+}, 220);
+
+window.addEventListener("resize", () => {
+  clampEmoteToStageBounds();
+  scheduleWindowSizeSync();
+});
+scheduleWindowSizeSync();
 setInterval(() => {
   if (dragging || mood === "sleepy") {
     return;
   }
 
-  if (Math.random() < 0.55) {
-    spawnBubble();
+  const ambientChance = Math.min(0.9, 0.25 * settings.bubbleAmount + 0.02 * lastSwimSpeed * settings.bubbleAmount);
+  if (Math.random() < ambientChance) {
+    spawnBubble({
+      size: 4 + Math.max(0, lastSwimSpeed - 1) * 0.7,
+      driftScale: 1 + lastSwimSpeed * 0.06
+    });
   }
 }, 1200);
