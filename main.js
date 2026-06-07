@@ -68,7 +68,7 @@ function createPetWindow() {
   const display = screen.getPrimaryDisplay();
   const size = 180;
   const margin = 24;
-  const x = Math.max(0, display.workArea.x + display.workArea.width - size - margin);
+  const x = Math.max(0, display.workArea.x + margin);
   const y = Math.max(0, display.workArea.y + display.workArea.height - size - margin);
 
   petWindow = new BrowserWindow({

@@ -825,7 +825,7 @@ if (window.petApi && typeof window.petApi.onGlobalTyping === "function") {
 window.petApi.setClickThrough(true);
 setMood("calm");
 refreshPettingState();
-setPetMode("roam");
+setPetMode("idle");
 
 if (eyeBase) {
   if (eyeBase.complete) {
