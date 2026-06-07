@@ -24,6 +24,13 @@ It runs in a transparent always-on-top window, can be dragged around, and stays 
 - Hover the pet to make it interactive.
 - Click and drag to move it around your screen.
 - Release the mouse to return it to click-through mode.
+- Move your cursor over the fish to pet it and trigger hearts.
+
+## Behaviors
+
+- Cursor chase swimming with 3D fold-like body motion.
+- Petting mood system: calm, happy, excited, sleepy.
+- Hearts when petted and bubbles while active.
 
 ## Files
 

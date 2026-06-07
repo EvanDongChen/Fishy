@@ -20,11 +20,12 @@ body {
 }
 
 .pet {
+  --swim-speed-mult: 1;
   position: relative;
   width: 160px;
   height: 110px;
   filter: drop-shadow(0 16px 20px var(--pet-shadow));
-  animation: floaty 1.9s ease-in-out infinite;
+  animation: floaty calc(1.9s / var(--swim-speed-mult)) ease-in-out infinite;
   cursor: grab;
 }
 
@@ -44,6 +45,11 @@ body {
   transform-style: preserve-3d;
   will-change: transform;
   transition: transform 90ms linear;
+  filter:
+    drop-shadow(1px 0 0 rgba(255, 255, 255, 0.95))
+    drop-shadow(-1px 0 0 rgba(255, 255, 255, 0.95))
+    drop-shadow(0 1px 0 rgba(255, 255, 255, 0.95))
+    drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.95));
 }
 
 .part {
@@ -58,22 +64,121 @@ body {
 
 .part.tail {
   transform-origin: 26% 50%;
-  animation: wag 0.75s ease-in-out infinite;
+  animation: wag calc(0.75s / var(--swim-speed-mult)) ease-in-out infinite;
 }
 
 .part.fin-top {
   transform-origin: 50% 28%;
-  animation: finTopFlap 0.9s ease-in-out infinite;
+  animation: finTopFlap calc(0.9s / var(--swim-speed-mult)) ease-in-out infinite;
 }
 
 .part.fin-bottom {
   transform-origin: 50% 75%;
-  animation: finBottomFlap 1.05s ease-in-out infinite;
+  animation: finBottomFlap calc(1.05s / var(--swim-speed-mult)) ease-in-out infinite;
 }
 
 .part.eye {
   transform-origin: 68% 44%;
   animation: blink 4.5s linear infinite;
+}
+
+.effects {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.heart {
+  --size: 13px;
+  position: absolute;
+  width: var(--size);
+  height: var(--size);
+  background: #ff5d7a;
+  transform: rotate(45deg);
+  opacity: 0;
+  animation: heartUp 1s ease-out forwards;
+}
+
+.heart::before,
+.heart::after {
+  content: "";
+  position: absolute;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: inherit;
+}
+
+.heart::before {
+  top: calc(-0.5 * var(--size));
+  left: 0;
+}
+
+.heart::after {
+  top: 0;
+  left: calc(-0.5 * var(--size));
+}
+
+.bubble {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 2px solid rgba(230, 248, 255, 0.95);
+  background: rgba(180, 236, 255, 0.25);
+  animation: bubbleUp 1.5s ease-out forwards;
+}
+
+.emote {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #7c2b10;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.pet.is-happy {
+  --swim-speed-mult: 1.2;
+}
+
+.pet.is-excited {
+  --swim-speed-mult: 1.35;
+}
+
+.pet.is-sleepy {
+  --swim-speed-mult: 0.58;
+}
+
+.pet.is-happy .emote,
+.pet.is-excited .emote,
+.pet.is-sleepy .emote {
+  opacity: 1;
+}
+
+.pet.is-sleepy .part.eye {
+  animation-duration: 7.5s;
+}
+
+.pet.is-being-pet {
+  --swim-speed-mult: 1.45;
+}
+
+.pet.is-being-pet .part.eye {
+  animation: none;
+  transform: scaleY(0.14) translateY(1px);
+}
+
+.pet.is-being-pet .emote {
+  opacity: 1;
 }
 
 @keyframes floaty {
@@ -103,4 +208,16 @@ body {
   0% { transform: rotate(0deg) translateY(0); }
   50% { transform: rotate(7deg) translateY(1px); }
   100% { transform: rotate(0deg) translateY(0); }
+}
+
+@keyframes heartUp {
+  0% { transform: translate3d(0, 0, 0) rotate(45deg) scale(0.65); opacity: 0; }
+  20% { opacity: 0.95; }
+  100% { transform: translate3d(var(--drift-x, 0px), -34px, 0) rotate(45deg) scale(1.05); opacity: 0; }
+}
+
+@keyframes bubbleUp {
+  0% { transform: translate3d(0, 0, 0) scale(0.7); opacity: 0; }
+  20% { opacity: 0.8; }
+  100% { transform: translate3d(var(--drift-x, 8px), -40px, 0) scale(1.2); opacity: 0; }
 }
