@@ -38,6 +38,10 @@ body {
   --body-fold: 0deg;
   --swim-tilt: 0deg;
   --swim-bob: 0px;
+  --eye-center-x: 68.7%;
+  --eye-center-y: 44.2%;
+  --pupil-x: 0px;
+  --pupil-y: 0px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -77,9 +81,30 @@ body {
   animation: finBottomFlap calc(1.05s / var(--swim-speed-mult)) ease-in-out infinite;
 }
 
-.part.eye {
+.part.eye-group {
   transform-origin: 68% 44%;
   animation: blink 4.5s linear infinite;
+}
+
+.eye-base {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.pupil {
+  position: absolute;
+  width: var(--pupil-size, 4px);
+  height: var(--pupil-size, 4px);
+  left: calc(var(--eye-center-x) - (var(--pupil-size) / 2));
+  top: calc(var(--eye-center-y) - (var(--pupil-size) / 2));
+  border-radius: 50%;
+  background: #1a0d0b;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
+  transform: translate(var(--pupil-x), var(--pupil-y));
+  transition: transform 70ms linear;
 }
 
 .effects {
@@ -164,7 +189,7 @@ body {
   opacity: 1;
 }
 
-.pet.is-sleepy .part.eye {
+.pet.is-sleepy .part.eye-group {
   animation-duration: 7.5s;
 }
 
@@ -172,7 +197,7 @@ body {
   --swim-speed-mult: 1.45;
 }
 
-.pet.is-being-pet .part.eye {
+.pet.is-being-pet .part.eye-group {
   animation: none;
   transform: scaleY(0.14) translateY(1px);
 }

@@ -1,5 +1,7 @@
 const pet = document.getElementById("pet");
 const fishLayer = document.querySelector(".fish-layered");
+const eyeBase = document.querySelector(".eye-base");
+const pupil = document.getElementById("pupil");
 const heartsLayer = document.getElementById("hearts");
 const bubblesLayer = document.getElementById("bubbles");
 const emote = document.getElementById("emote");
@@ -18,8 +20,164 @@ let roamTarget = null;
 let roamPauseUntil = 0;
 let pettingUntil = 0;
 let pettingStrength = 0;
+let wasPetting = false;
+let facingHint = 1;
+
+const eyeGeometry = {
+  centerXRatio: 0.687,
+  centerYRatio: 0.442,
+  radiusXRatio: 0.03,
+  radiusYRatio: 0.045,
+  pupilSizeRatio: 0.024
+};
+
+const eyeMask = {
+  width: 0,
+  height: 0,
+  allowedCenters: [],
+  centerX: 0,
+  centerY: 0
+};
 
 const PETTING_HOLD_MS = 240;
+const PUPIL_CLAMP_RADIUS_SCALE = 0.75;
+
+function detectEyeCircleFromPng(imageElement) {
+  if (!imageElement || !imageElement.naturalWidth || !imageElement.naturalHeight) {
+    return;
+  }
+
+  const width = imageElement.naturalWidth;
+  const height = imageElement.naturalHeight;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    return;
+  }
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(imageElement, 0, 0, width, height);
+  const data = ctx.getImageData(0, 0, width, height).data;
+
+  const innerPixels = [];
+  const opaquePixels = [];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const idx = (y * width + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const a = data[idx + 3];
+
+      if (a < 18) {
+        continue;
+      }
+
+      opaquePixels.push({ x, y });
+      const nearWhite = r > 210 && g > 210 && b > 210 && a > 210;
+      if (nearWhite) {
+        innerPixels.push({ x, y });
+      }
+    }
+  }
+
+  const candidates = innerPixels.length > 0 ? innerPixels : opaquePixels;
+  if (candidates.length === 0) {
+    return;
+  }
+
+  let sumX = 0;
+  let sumY = 0;
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const p of candidates) {
+    sumX += p.x;
+    sumY += p.y;
+    if (p.x < minX) {
+      minX = p.x;
+    }
+    if (p.x > maxX) {
+      maxX = p.x;
+    }
+    if (p.y < minY) {
+      minY = p.y;
+    }
+    if (p.y > maxY) {
+      maxY = p.y;
+    }
+  }
+
+  const centerX = sumX / candidates.length;
+  const centerY = sumY / candidates.length;
+
+  const rawRadiusX = Math.max(1, Math.max(centerX - minX, maxX - centerX));
+  const rawRadiusY = Math.max(1, Math.max(centerY - minY, maxY - centerY));
+  const equivalentRadius = Math.sqrt(candidates.length / Math.PI);
+
+  // Keep the pupil inside the detected circle/ellipse with a small inset.
+  const safeRadiusX = Math.max(1, Math.min(rawRadiusX, equivalentRadius) - 0.8);
+  const safeRadiusY = Math.max(1, Math.min(rawRadiusY, equivalentRadius) - 0.8);
+  const pupilSize = Math.max(2, Math.min(safeRadiusX, safeRadiusY) * 0.52);
+
+  const candidateSet = new Set();
+  for (const p of candidates) {
+    candidateSet.add(`${p.x},${p.y}`);
+  }
+
+  // Compute centers that keep the whole pupil disk inside the detected eye region.
+  const radiusForMask = Math.max(1, Math.floor(pupilSize / 2));
+  const allowedCenters = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let valid = true;
+      for (let oy = -radiusForMask; oy <= radiusForMask && valid; oy += 1) {
+        for (let ox = -radiusForMask; ox <= radiusForMask; ox += 1) {
+          if (ox * ox + oy * oy > radiusForMask * radiusForMask) {
+            continue;
+          }
+          const px = x + ox;
+          const py = y + oy;
+          if (px < 0 || py < 0 || px >= width || py >= height) {
+            valid = false;
+            break;
+          }
+          if (!candidateSet.has(`${px},${py}`)) {
+            valid = false;
+            break;
+          }
+        }
+      }
+      if (valid) {
+        allowedCenters.push({ x, y });
+      }
+    }
+  }
+
+  eyeGeometry.centerXRatio = centerX / width;
+  eyeGeometry.centerYRatio = centerY / height;
+  eyeGeometry.radiusXRatio = safeRadiusX / width;
+  eyeGeometry.radiusYRatio = safeRadiusY / height;
+  eyeGeometry.pupilSizeRatio = pupilSize / width;
+
+  eyeMask.width = width;
+  eyeMask.height = height;
+  eyeMask.allowedCenters = allowedCenters;
+  eyeMask.centerX = centerX;
+  eyeMask.centerY = centerY;
+
+  if (fishLayer) {
+    fishLayer.style.setProperty("--eye-center-x", `${(eyeGeometry.centerXRatio * 100).toFixed(3)}%`);
+    fishLayer.style.setProperty("--eye-center-y", `${(eyeGeometry.centerYRatio * 100).toFixed(3)}%`);
+    fishLayer.style.setProperty("--pupil-size", `${Math.max(2, Math.round(pupilSize * (pet ? (pet.clientWidth / width) : 1)))}px`);
+  }
+}
 
 function setMood(nextMood) {
   if (!pet || mood === nextMood) {
@@ -169,6 +327,79 @@ function refreshPettingState() {
   pettingStrength += (targetStrength - pettingStrength) * 0.22;
 }
 
+function updatePupilFromState(state) {
+  if (!pupil || !fishLayer || !state || !state.bounds) {
+    return;
+  }
+
+  const width = state.bounds.width;
+  const height = state.bounds.height;
+  if (!width || !height) {
+    return;
+  }
+
+  const fishWidth = pet ? pet.clientWidth : width;
+  const fishHeight = pet ? pet.clientHeight : height;
+  const fishOffsetX = (width - fishWidth) / 2;
+  const fishOffsetY = (height - fishHeight) / 2;
+
+  let localX = state.cursor.x - state.bounds.x - fishOffsetX;
+  const localY = state.cursor.y - state.bounds.y - fishOffsetY;
+
+  const facing = Number(getComputedStyle(fishLayer).getPropertyValue("--facing")) || facingHint || 1;
+  if (facing < 0) {
+    localX = fishWidth - localX;
+  }
+
+  const eyeCenterX = fishWidth * eyeGeometry.centerXRatio;
+  const eyeCenterY = fishHeight * eyeGeometry.centerYRatio;
+  const pupilSize = Math.max(2, fishWidth * eyeGeometry.pupilSizeRatio);
+  let dx = 0;
+  let dy = 0;
+
+  if (eyeMask.allowedCenters.length > 0 && eyeMask.width > 0 && eyeMask.height > 0) {
+    const desiredMaskX = (localX / fishWidth) * eyeMask.width;
+    const desiredMaskY = (localY / fishHeight) * eyeMask.height;
+
+    let best = eyeMask.allowedCenters[0];
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const point of eyeMask.allowedCenters) {
+      const ddx = point.x - desiredMaskX;
+      const ddy = point.y - desiredMaskY;
+      const distance = ddx * ddx + ddy * ddy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = point;
+      }
+    }
+
+    const targetFishX = (best.x / eyeMask.width) * fishWidth;
+    const targetFishY = (best.y / eyeMask.height) * fishHeight;
+    dx = targetFishX - eyeCenterX;
+    dy = targetFishY - eyeCenterY;
+  } else {
+    const maxX = Math.max(1, fishWidth * eyeGeometry.radiusXRatio - pupilSize * 0.5);
+    const maxY = Math.max(1, fishHeight * eyeGeometry.radiusYRatio - pupilSize * 0.5);
+    dx = localX - eyeCenterX;
+    dy = localY - eyeCenterY;
+
+    const nx = dx / maxX;
+    const ny = dy / maxY;
+    const magnitude = Math.hypot(nx, ny);
+    if (magnitude > 1) {
+      dx = (dx / magnitude) * maxX;
+      dy = (dy / magnitude) * maxY;
+    }
+  }
+
+  dx *= PUPIL_CLAMP_RADIUS_SCALE;
+  dy *= PUPIL_CLAMP_RADIUS_SCALE;
+
+  fishLayer.style.setProperty("--pupil-x", `${dx.toFixed(2)}px`);
+  fishLayer.style.setProperty("--pupil-y", `${dy.toFixed(2)}px`);
+  fishLayer.style.setProperty("--pupil-size", `${pupilSize.toFixed(2)}px`);
+}
+
 function updateSwimPose(dx, dy, speed) {
   if (!fishLayer) {
     return;
@@ -177,6 +408,7 @@ function updateSwimPose(dx, dy, speed) {
   const moodMult = mood === "excited" ? 1.35 : mood === "sleepy" ? 0.5 : mood === "happy" ? 1.15 : 1;
   const intensity = Math.min(1, (speed * moodMult) / 8);
   const facing = dx >= 0 ? 1 : -1;
+  facingHint = facing;
   swimPhase += 0.28 + intensity * 0.42;
 
   const foldAngle = Math.sin(swimPhase) * (6 + intensity * 10) + Math.sin(swimPhase * 1.9) * pettingStrength * 8;
@@ -201,17 +433,28 @@ async function swimRoam() {
       return;
     }
 
+    updatePupilFromState(state);
+
     refreshPettingState();
 
     // While being petted, stay in place and only play the pose animation.
-    if (Date.now() < pettingUntil) {
-      roamPauseUntil = Date.now() + 220;
-      updateSwimPose(1, 0, 0.3);
+    const isPetting = Date.now() < pettingUntil;
+    if (isPetting) {
+      wasPetting = true;
+      roamTarget = null;
+      roamPauseUntil = Date.now() + 120;
+      updateSwimPose(facingHint, 0, 0.3);
       return;
     }
 
     const centerX = state.bounds.x + state.bounds.width / 2;
     const centerY = state.bounds.y + state.bounds.height / 2;
+
+    if (wasPetting) {
+      wasPetting = false;
+      roamPauseUntil = 0;
+      roamTarget = chooseRoamTarget(state.workArea, state.bounds);
+    }
 
     if (!roamTarget) {
       roamTarget = chooseRoamTarget(state.workArea, state.bounds);
@@ -338,6 +581,16 @@ pet.addEventListener("mouseleave", () => {
 window.petApi.setClickThrough(true);
 setMood("calm");
 refreshPettingState();
+
+if (eyeBase) {
+  if (eyeBase.complete) {
+    detectEyeCircleFromPng(eyeBase);
+  }
+
+  eyeBase.addEventListener("load", () => {
+    detectEyeCircleFromPng(eyeBase);
+  });
+}
 
 // Swim around autonomously with a light easing loop.
 setInterval(swimRoam, 34);
