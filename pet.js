@@ -25,6 +25,9 @@ let wasPetting = false;
 let facingHint = 1;
 let petMode = "roam";
 let isModeMenuOpen = false;
+let pettingStrokeDistance = 0;
+let pettingStrokeStartedAt = 0;
+let pettingDirectionMask = 0;
 
 const eyeGeometry = {
   centerXRatio: 0.687,
@@ -44,6 +47,23 @@ const eyeMask = {
 
 const PETTING_HOLD_MS = 240;
 const PUPIL_CLAMP_RADIUS_SCALE = 0.75;
+const PETTING_MIN_MOVE = 3.2;
+const PETTING_STROKE_DISTANCE = 18;
+const PETTING_STROKE_WINDOW_MS = 260;
+const DIR_LEFT = 1;
+const DIR_RIGHT = 2;
+const DIR_UP = 4;
+const DIR_DOWN = 8;
+
+function countDirectionBits(mask) {
+  let count = 0;
+  let value = mask;
+  while (value) {
+    count += value & 1;
+    value >>= 1;
+  }
+  return count;
+}
 
 function detectEyeCircleFromPng(imageElement) {
   if (!imageElement || !imageElement.naturalWidth || !imageElement.naturalHeight) {
@@ -503,7 +523,16 @@ async function swimRoam() {
     }
 
     if (petMode === "idle") {
-      updateSwimPose(facingHint, 0, 0.15);
+      const isPetting = Date.now() < pettingUntil;
+      if (isPetting) {
+        updateSwimPose(facingHint, 0, 0.15);
+        return;
+      }
+
+      const centerX = state.bounds.x + state.bounds.width / 2;
+      const dxToCursor = state.cursor.x - centerX;
+      const faceDx = Math.abs(dxToCursor) < 2 ? facingHint : dxToCursor;
+      updateSwimPose(faceDx, 0, 0.15);
       return;
     }
 
@@ -613,12 +642,42 @@ pet.addEventListener("mousemove", (event) => {
   }
 
   const travel = Math.hypot(event.clientX - lastPetX, event.clientY - lastPetY);
+  const deltaX = event.clientX - lastPetX;
+  const deltaY = event.clientY - lastPetY;
   lastPetX = event.clientX;
   lastPetY = event.clientY;
 
-  if (travel < 1.8) {
+  if (travel < PETTING_MIN_MOVE) {
     return;
   }
+
+  const now = Date.now();
+  if (!pettingStrokeStartedAt || now - pettingStrokeStartedAt > PETTING_STROKE_WINDOW_MS) {
+    pettingStrokeStartedAt = now;
+    pettingStrokeDistance = 0;
+    pettingDirectionMask = 0;
+  }
+
+  pettingStrokeDistance += travel;
+
+  if (Math.abs(deltaX) > 1.2 || Math.abs(deltaY) > 1.2) {
+    if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+      pettingDirectionMask |= deltaX >= 0 ? DIR_RIGHT : DIR_LEFT;
+    } else {
+      pettingDirectionMask |= deltaY >= 0 ? DIR_DOWN : DIR_UP;
+    }
+  }
+
+  if (
+    pettingStrokeDistance < PETTING_STROKE_DISTANCE
+    || countDirectionBits(pettingDirectionMask) < 2
+  ) {
+    return;
+  }
+
+  pettingStrokeDistance = 0;
+  pettingStrokeStartedAt = now;
+  pettingDirectionMask = 0;
 
   pettingUntil = Date.now() + PETTING_HOLD_MS;
   boostAffection(Math.min(2.2, travel * 0.11));
@@ -658,6 +717,9 @@ window.addEventListener("mouseup", () => {
 pet.addEventListener("mouseleave", () => {
   lastPetX = null;
   lastPetY = null;
+  pettingStrokeDistance = 0;
+  pettingStrokeStartedAt = 0;
+  pettingDirectionMask = 0;
   pettingUntil = 0;
   refreshPettingState();
 });
