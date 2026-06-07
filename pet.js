@@ -5,6 +5,7 @@ const pupil = document.getElementById("pupil");
 const heartsLayer = document.getElementById("hearts");
 const bubblesLayer = document.getElementById("bubbles");
 const emote = document.getElementById("emote");
+const modeMenu = document.getElementById("mode-menu");
 
 let dragging = false;
 let lastX = 0;
@@ -22,6 +23,8 @@ let pettingUntil = 0;
 let pettingStrength = 0;
 let wasPetting = false;
 let facingHint = 1;
+let petMode = "roam";
+let isModeMenuOpen = false;
 
 const eyeGeometry = {
   centerXRatio: 0.687,
@@ -327,6 +330,62 @@ function refreshPettingState() {
   pettingStrength += (targetStrength - pettingStrength) * 0.22;
 }
 
+function updateModeButtonSelection() {
+  if (!modeMenu) {
+    return;
+  }
+
+  const buttons = modeMenu.querySelectorAll("button[data-mode]");
+  for (const button of buttons) {
+    const selected = button.dataset.mode === petMode;
+    button.classList.toggle("is-selected", selected);
+  }
+}
+
+function setPetMode(nextMode) {
+  if (nextMode !== "roam" && nextMode !== "idle") {
+    return;
+  }
+
+  petMode = nextMode;
+  updateModeButtonSelection();
+}
+
+function openModeMenu(clientX, clientY) {
+  if (!modeMenu || !pet) {
+    return;
+  }
+
+  isModeMenuOpen = true;
+  modeMenu.classList.add("is-open");
+  modeMenu.setAttribute("aria-hidden", "false");
+  updateModeButtonSelection();
+  window.petApi.setClickThrough(false);
+
+  const rect = pet.getBoundingClientRect();
+  const menuWidth = 98;
+  const menuHeight = 66;
+  const left = Math.max(4, Math.min(clientX - rect.left, rect.width - menuWidth - 4));
+  const top = Math.max(4, Math.min(clientY - rect.top, rect.height - menuHeight - 4));
+
+  modeMenu.style.left = `${left}px`;
+  modeMenu.style.top = `${top}px`;
+}
+
+function closeModeMenu() {
+  if (!modeMenu || !isModeMenuOpen) {
+    return;
+  }
+
+  isModeMenuOpen = false;
+  modeMenu.classList.remove("is-open");
+  modeMenu.setAttribute("aria-hidden", "true");
+
+  if (!dragging) {
+    window.petApi.setClickThrough(true);
+  }
+}
+
 function updatePupilFromState(state) {
   if (!pupil || !fishLayer || !state || !state.bounds) {
     return;
@@ -395,9 +454,11 @@ function updatePupilFromState(state) {
   dx *= PUPIL_CLAMP_RADIUS_SCALE;
   dy *= PUPIL_CLAMP_RADIUS_SCALE;
 
+  const snappedPupilSize = Math.max(2, Math.round(pupilSize));
+
   fishLayer.style.setProperty("--pupil-x", `${dx.toFixed(2)}px`);
   fishLayer.style.setProperty("--pupil-y", `${dy.toFixed(2)}px`);
-  fishLayer.style.setProperty("--pupil-size", `${pupilSize.toFixed(2)}px`);
+  fishLayer.style.setProperty("--pupil-size", `${snappedPupilSize}px`);
 }
 
 function updateSwimPose(dx, dy, speed) {
@@ -436,6 +497,15 @@ async function swimRoam() {
     updatePupilFromState(state);
 
     refreshPettingState();
+    if (isModeMenuOpen) {
+      updateSwimPose(facingHint, 0, 0.12);
+      return;
+    }
+
+    if (petMode === "idle") {
+      updateSwimPose(facingHint, 0, 0.15);
+      return;
+    }
 
     // While being petted, stay in place and only play the pose animation.
     const isPetting = Date.now() < pettingUntil;
@@ -504,12 +574,21 @@ pet.addEventListener("mouseenter", () => {
 });
 
 pet.addEventListener("mouseleave", () => {
-  if (!dragging) {
+  if (!dragging && !isModeMenuOpen) {
     window.petApi.setClickThrough(true);
   }
 });
 
+pet.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+  openModeMenu(event.clientX, event.clientY);
+});
+
 pet.addEventListener("mousedown", (event) => {
+  if (event.button !== 0 || isModeMenuOpen) {
+    return;
+  }
+
   dragging = true;
   lastX = event.screenX;
   lastY = event.screenY;
@@ -519,6 +598,10 @@ pet.addEventListener("mousedown", (event) => {
 });
 
 pet.addEventListener("mousemove", (event) => {
+  if (isModeMenuOpen) {
+    return;
+  }
+
   if (dragging) {
     return;
   }
@@ -567,7 +650,9 @@ window.addEventListener("mouseup", () => {
   dragging = false;
   boostAffection(4);
   roamTarget = null;
-  window.petApi.setClickThrough(true);
+  if (!isModeMenuOpen) {
+    window.petApi.setClickThrough(true);
+  }
 });
 
 pet.addEventListener("mouseleave", () => {
@@ -577,10 +662,40 @@ pet.addEventListener("mouseleave", () => {
   refreshPettingState();
 });
 
+if (modeMenu) {
+  modeMenu.addEventListener("mousedown", (event) => {
+    event.stopPropagation();
+  });
+
+  modeMenu.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const mode = target.dataset.mode;
+    if (!mode) {
+      return;
+    }
+
+    setPetMode(mode);
+    closeModeMenu();
+  });
+}
+
+window.addEventListener("mousedown", (event) => {
+  if (!isModeMenuOpen || !modeMenu || modeMenu.contains(event.target)) {
+    return;
+  }
+
+  closeModeMenu();
+});
+
 // Start in click-through mode so the pet does not block normal desktop interactions.
 window.petApi.setClickThrough(true);
 setMood("calm");
 refreshPettingState();
+setPetMode("roam");
 
 if (eyeBase) {
   if (eyeBase.complete) {
